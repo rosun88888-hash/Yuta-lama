@@ -1,0 +1,113 @@
+require("dotenv").config();
+
+const express = require("express");
+
+const app = express();
+app.use(express.json());
+
+const {
+  PAGE_ACCESS_TOKEN,
+  VERIFY_TOKEN,
+  GRAPH_API_VERSION,
+  PORT = 3000
+} = process.env;
+
+if (!PAGE_ACCESS_TOKEN || !VERIFY_TOKEN || !GRAPH_API_VERSION) {
+  throw new Error("Missing required settings in .env");
+}
+
+// Verify the Messenger webhook
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("Webhook verified!");
+    return res.status(200).send(challenge);
+  }
+
+  return res.sendStatus(403);
+});
+
+// Receive messages from Facebook
+app.post("/webhook", (req, res) => {
+  const body = req.body;
+
+  if (body.object !== "page") {
+    return res.sendStatus(404);
+  }
+
+  // Respond immediately to Meta
+  res.status(200).send("EVENT_RECEIVED");
+
+  for (const entry of body.entry || []) {
+    for (const event of entry.messaging || []) {
+      if (!event.message || !event.sender?.id) continue;
+      if (event.message.is_echo) continue;
+
+      const senderId = event.sender.id;
+      const text = (event.message.text || "")
+        .trim()
+        .toLowerCase();
+
+      if (
+        text === "!heartattack" ||
+        text === "heartattack" ||
+        text === "!ha"
+      ) {
+        sendHeartAttack(senderId).catch(console.error);
+      } else if (text === "!help") {
+        sendMessage(
+          senderId,
+          "❤️ Commands:\n!heartattack - Heart attack prank 💓\n!ha - Same effect\n!help - Show commands"
+        ).catch(console.error);
+      }
+    }
+  }
+});
+
+// Send a Messenger text message
+async function sendMessage(recipientId, text) {
+  const url =
+    `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages` +
+    `?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientId },
+      message: { text }
+    })
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(JSON.stringify(result));
+  }
+
+  console.log("Message sent:", result.message_id);
+}
+
+// Heart attack prank effect
+async function sendHeartAttack(senderId) {
+  const messages = [
+    "💓 💗 💓 💗 💓",
+    "🚨 WARNING: HEART OVERLOAD! 🚨",
+    "❤️‍🔥 BOOM! HEART ATTACK! 💥",
+    "💗💓💗 You just got hit by LOVE! 😂❤️",
+    "🫀 SYSTEM STATUS: TOO MUCH LOVE 💘"
+  ];
+
+  for (const message of messages) {
+    await sendMessage(senderId, message);
+  }
+}
+
+app.listen(PORT, () => {
+  console.log(`Heart Attack Bot running on port ${PORT}`);
+});
